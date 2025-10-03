@@ -105,7 +105,7 @@ def _component_dice_ce_loss(
     ce_map = -(yt * log_probs).sum(dim=0)
     ce_loss = ce_map.mean()
 
-    return dice_loss + ce_loss
+    return dice_loss + _safe_mean(ce_loss, (pred_mask | true_mask))
 
 
 def _build_global_dc_ce_loss(trainer: nnUNetTrainer) -> nn.Module:
