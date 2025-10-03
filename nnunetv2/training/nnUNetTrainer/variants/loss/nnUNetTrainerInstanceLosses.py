@@ -90,25 +90,20 @@ def _component_dice_ce_loss(
     true_mask: torch.Tensor,
 ) -> torch.Tensor:
     eps = 1e-5
-    mask_union = (pred_mask | true_mask)
-    mask_float = mask_union.to(dtype=y_pred.dtype)
 
-    foreground_prob = torch.clamp(y_pred[1], min=eps, max=1.0 - eps)
-    foreground_true = y_true[1]
+    yp = y_pred.to(torch.float32)
+    yt = y_true.to(torch.float32)
 
-    masked_pred = foreground_prob * mask_float
-    masked_true = foreground_true * mask_float
+    foreground_pred = yp[1]
+    foreground_true = yt[1]
 
-    intersection = (masked_pred * masked_true).sum()
-    denominator = masked_pred.sum() + masked_true.sum()
-    if float(denominator) > 0.0:
-        dice_loss = 1.0 - (2.0 * intersection + eps) / (denominator + eps)
-    else:
-        dice_loss = torch.zeros((), device=y_pred.device, dtype=y_pred.dtype)
+    intersection = (foreground_pred * foreground_true).sum()
+    denominator = (foreground_pred.sum() + foreground_true.sum()).clamp_min(eps)
+    dice_loss = 1.0 - (2.0 * intersection / denominator)
 
-    log_probs = torch.log(torch.clamp(y_pred, min=eps, max=1.0 - eps))
-    per_voxel_ce = -(y_true * log_probs).sum(dim=0)
-    ce_loss = _safe_mean(per_voxel_ce, mask_union)
+    log_probs = torch.log(yp.clamp_min(eps))
+    ce_map = -(yt * log_probs).sum(dim=0)
+    ce_loss = ce_map.mean()
 
     return dice_loss + ce_loss
 
@@ -117,7 +112,7 @@ def _build_global_dc_ce_loss(trainer: nnUNetTrainer) -> nn.Module:
     loss = DC_and_CE_loss(
         {
             'batch_dice': trainer.configuration_manager.batch_dice,
-            'smooth': 1e-5,
+            'smooth': 0,
             'do_bg': False,
             'ddp': trainer.is_ddp,
         },
