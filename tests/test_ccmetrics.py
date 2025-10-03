@@ -26,7 +26,7 @@ def _baseline_score(y_pred_np: np.ndarray, y_np: np.ndarray) -> float:
     samples = []
     for batch_index in range(y_np.shape[0]):
         cc_dice = CCDiceMetric(cc_reduction="patient")
-        space_separation.compute_voronoi_regions(
+        space_separation.compute_voronoi_regions_fast(
             y_np[batch_index, 1].astype(np.uint16, copy=False)
         )
         cc_dice(
@@ -54,7 +54,7 @@ def test_ccmetrics_matches_ccdice_empty(spatial):
 
     torch_score = module(y_pred_t, y_idx).detach().cpu().item()
 
-    assert torch_score == pytest.approx(baseline, rel=1e-4, abs=1e-5)
+    assert torch_score == pytest.approx(baseline, rel=1e-5, abs=1e-5)
 
 
 @pytest.mark.parametrize("spatial", [(24, 24, 24)])
@@ -84,15 +84,15 @@ def test_ccmetrics_matches_ccdice_gt_nonempty_pred_empty(spatial):
 
     torch_score = module(y_pred_t, y_idx).detach().cpu().item()
 
-    assert torch_score == pytest.approx(baseline, rel=1e-4, abs=1e-5)
+    assert torch_score == pytest.approx(baseline, rel=1e-5, abs=1e-5)
 
 
 @pytest.mark.parametrize(
     "spatial,p_fg_gt,p_fg_pred,seed",
     [
-        ((16, 16, 16), 0.5, 0.5, 0),
-        ((12, 18, 20), 0.2, 0.7, 1),
-        ((20, 20, 12), 0.8, 0.3, 2),
+        ((50, 16, 66), 0.5, 0.5, 0),
+        ((18, 40, 40), 0.2, 0.7, 1),
+        ((25, 40, 82), 0.8, 0.3, 2),
     ],
 )
 def test_ccmetrics_matches_ccdice_random_batch(spatial, p_fg_gt, p_fg_pred, seed):
@@ -114,4 +114,4 @@ def test_ccmetrics_matches_ccdice_random_batch(spatial, p_fg_gt, p_fg_pred, seed
     module = TorchCCMetrics(metric=dice_fn, activation=None).to(device)
     torch_score = module(batch_pred, batch_idx).detach().cpu().item()
 
-    assert torch_score == pytest.approx(baseline, rel=0.01, abs=1e-2)
+    assert torch_score == pytest.approx(baseline, rel=1e-2, abs=1e-5)

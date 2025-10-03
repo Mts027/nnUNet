@@ -15,12 +15,10 @@ class CCMetrics(torch.nn.Module):
         assert list(y.shape) == [y_pred.shape[0], 1, *y_pred.shape[2:]], f"Expected y with shape ({tuple(y_pred.shape)}) [B,1,H,W,D], but got {tuple(y.shape)}"
         assert y.dtype == torch.int64, f"Expected y.dtype=torch.int64, but got {y.dtype}"
 
-        if not y_pred.is_cuda:
-            raise RuntimeError("CCMetrics expects CUDA tensors for y_pred.")
-        if not y.is_cuda:
-            raise RuntimeError("CCMetrics expects CUDA tensors for y.")
-        if y.device != y_pred.device:
-            raise RuntimeError("y and y_pred must reside on the same CUDA device.")
+        assert y_pred.is_cuda, f"CCMetrics expects CUDA tensors for y_pred, but got device {y_pred.device}."
+        assert y.is_cuda, f"CCMetrics expects CUDA tensors for y, but got device {y.device}."
+        assert y.device == y_pred.device, f"y and y_pred must reside on the same CUDA device, but got y on {y.device} and y_pred on {y_pred.device}."
+
         y = y.to(dtype=torch.int64)
 
         y_idx = y[:, 0].long()  # [B,*]
