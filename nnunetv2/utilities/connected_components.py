@@ -1,61 +1,36 @@
 import torch
-import numpy as np
-
 try:
     import cupy as cp  # type: ignore
     from cupyx.scipy.ndimage import distance_transform_edt as cp_distance_transform_edt  # type: ignore
     from cupyx.scipy.ndimage import label as cp_label  # type: ignore
+    _CUPY_IMPORT_ERROR = None
     _HAS_CUPY = True
-except Exception:  # pragma: no cover - cupy optional
+except Exception as exc:  # pragma: no cover - CuPy required at runtime
     cp = None  # type: ignore
     cp_distance_transform_edt = None  # type: ignore
     cp_label = None  # type: ignore
+    _CUPY_IMPORT_ERROR = exc
     _HAS_CUPY = False
 
-try:
-    from scipy.ndimage import distance_transform_edt as sp_distance_transform_edt  # type: ignore
-    from scipy.ndimage import label as sp_label  # type: ignore
-    _HAS_SCIPY = True
-except Exception:  # pragma: no cover - scipy optional but required for CPU path
-    sp_distance_transform_edt = None  # type: ignore
-    sp_label = None  # type: ignore
-    _HAS_SCIPY = False
 
-_STRUCTURE = np.ones((3, 3, 3), dtype=bool)
-
-
-def _require_cpu_dependencies():
-    if not _HAS_SCIPY:
-        raise RuntimeError(
-            "CPU connected components/Voronoi fallback requires SciPy. "
-            "Please install scipy>=1.6 or provide a GPU with CuPy support."
-        )
-
-
-def get_cc(y: torch.Tensor, do_bg: bool, use_cpu: bool = False):
-    """Assign per-channel connected-component ids, optionally retaining background voxels.
+def get_cc(y: torch.Tensor, do_bg: bool):
+    """Assign per-channel connected-component ids on the GPU.
 
     Args:
         y: Prediction or target tensor shaped ``[B, C, D, H, W]``.
         do_bg: Whether to keep channel 0 (usually background) in the assignments.
-        use_cpu: If ``True`` force CPU fallback; otherwise use the CuPy GPU path. - Not Implemented right now.
     """
     assert y.ndim == 5
     cc_assignments = []
     for batch_index in range(y.shape[0]):
         per_channel = []
         for channel_index in range(0 if do_bg else 1, y.shape[1]):
-            use_cpu_path = use_cpu or not _HAS_CUPY
+            if not _HAS_CUPY:
+                raise RuntimeError("CuPy with CUDA support is required for connected components.") from _CUPY_IMPORT_ERROR
             mask = y[batch_index, channel_index] > 0
-            if use_cpu_path:
-                _require_cpu_dependencies()
-                cc_np = connected_components_numpy(mask.detach().cpu().numpy())
-                cc_per_channel = torch.from_numpy(cc_np).to(device=y.device, dtype=torch.int64)
-            else:
-                cc_per_channel = torch.from_dlpack(
-                    connected_components_cupy(mask, dlpack=True)
-                ).to(device=y.device, dtype=torch.int64)
-                # cc_per_channel = cc3d_gpu_maxpool(y[batch_index, channel_index] > 0)
+            cc_per_channel = torch.from_dlpack(
+                connected_components_cupy(mask, dlpack=True)
+            ).to(device=y.device, dtype=torch.int64)
             per_channel.append(cc_per_channel)
         per_channel = torch.stack(per_channel, dim=0)
         cc_assignments.append(per_channel)
@@ -76,14 +51,13 @@ def get_cc(y: torch.Tensor, do_bg: bool, use_cpu: bool = False):
 
 
 def get_voronoi(
-    y: torch.Tensor, do_bg: bool, use_cpu: bool = False,
+    y: torch.Tensor, do_bg: bool,
 ) -> torch.Tensor:
-    """Compute per-channel Voronoi maps around foreground components.
+    """Compute per-channel Voronoi maps around foreground components on the GPU.
 
     Args:
         y: One-hot tensor with foreground channels, shaped ``[B, C, D, H, W]``.
         do_bg: Whether to keep the background channel in the output structure.
-        use_cpu: If ``True`` use the CPU implementation; otherwise rely on CuPy. - Not Implemented right now.
     """
     assert y.ndim == 5
 
@@ -91,21 +65,14 @@ def get_voronoi(
     for batch_index in range(y.shape[0]):
         per_channel = []
         for channel_index in range(0 if do_bg else 1, y.shape[1]):
-            use_cpu_path = use_cpu or not _HAS_CUPY
+            if not _HAS_CUPY:
+                raise RuntimeError("CuPy with CUDA support is required for Voronoi computation.") from _CUPY_IMPORT_ERROR
             mask = y[batch_index, channel_index] > 0
-            if use_cpu_path:
-                _require_cpu_dependencies()
-                vor_np = compute_voronoi_numpy(mask.detach().cpu().numpy())
-                per_channel.append(
-                    torch.from_numpy(vor_np).to(device=y.device, dtype=torch.int64)
-                )
-            else:
-                per_channel.append(
-                    torch.from_dlpack(
-                        compute_voronoi_cupy(mask, dlpack=True)
-                    ).to(device=y.device, dtype=torch.int64)
-                )
-                # per_channel.append(voronoi_3d(cc3d_gpu_maxpool(y[batch_index, channel_index] > 0))[1])
+            per_channel.append(
+                torch.from_dlpack(
+                    compute_voronoi_cupy(mask, dlpack=True)
+                ).to(device=y.device, dtype=torch.int64)
+            )
         per_channel = torch.stack(per_channel, dim=0)
         cc_assignments.append(per_channel)
 
@@ -193,34 +160,3 @@ def connected_components_cupy(labels, dlpack: bool = False):
         return labeled_cc
     else:
         return cp.asnumpy(labeled_cc)
-
-
-def connected_components_numpy(labels: np.ndarray) -> np.ndarray:
-    _require_cpu_dependencies()
-    labels = labels.astype(bool, copy=False)
-    if labels.size == 0:
-        return np.zeros_like(labels, dtype=np.int64)
-
-    labeled_cc, _ = sp_label(labels, structure=_STRUCTURE)
-    return labeled_cc.astype(np.int64, copy=False)
-
-
-def compute_voronoi_numpy(labels: np.ndarray) -> np.ndarray:
-    _require_cpu_dependencies()
-    labels = labels.astype(bool, copy=False)
-    if labels.size == 0:
-        return np.zeros_like(labels, dtype=np.int64)
-
-    labeled_cc = connected_components_numpy(labels)
-    if labeled_cc.max() == 0:
-        return labeled_cc
-
-    inv_mask = labeled_cc == 0
-    indices = sp_distance_transform_edt(
-        inv_mask,
-        return_distances=False,
-        return_indices=True,
-        sampling=None,
-    )
-    vor = labeled_cc[tuple(indices)]
-    return vor.astype(np.int64, copy=False)

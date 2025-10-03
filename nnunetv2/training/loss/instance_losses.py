@@ -15,23 +15,32 @@ class CCMetrics(torch.nn.Module):
         assert list(y.shape) == [y_pred.shape[0], 1, *y_pred.shape[2:]], f"Expected y with shape ({tuple(y_pred.shape)}) [B,1,H,W,D], but got {tuple(y.shape)}"
         assert y.dtype == torch.int64, f"Expected y.dtype=torch.int64, but got {y.dtype}"
 
+        if not y_pred.is_cuda:
+            raise RuntimeError("CCMetrics expects CUDA tensors for y_pred.")
+        if not y.is_cuda:
+            raise RuntimeError("CCMetrics expects CUDA tensors for y.")
+        if y.device != y_pred.device:
+            raise RuntimeError("y and y_pred must reside on the same CUDA device.")
+        y = y.to(dtype=torch.int64)
+
         y_idx = y[:, 0].long()  # [B,*]
         y = F.one_hot(y_idx, num_classes=y_pred.shape[1]).movedim(-1, 1).float()  # [B,2,*]
 
-        voronoi = get_voronoi(y, do_bg=False, use_cpu=True)
-        voronoi = voronoi[:, 0,...]
+        voronoi = get_voronoi(y, do_bg=False)
+        voronoi = voronoi[:, 0, ...]
 
         assert y_pred.shape == y.shape, "y_pred and one-hot y must match"
         assert voronoi.dtype == torch.int64
         assert list(voronoi.shape) == [y_pred.shape[0], *y_pred.shape[2:]], f"Expected voronoi with shape [B,H,W,D], but got {tuple(voronoi.shape)}"
  
-        return binary_cc(
+        result = binary_cc(
             y_pred=y_pred,
             y=y,
             voronoi=voronoi,
             metric=self.metric,
             activation=self.activation,
         )
+        return result
 
 
 def per_channel_cc(
@@ -116,4 +125,3 @@ def binary_cc(
     scores = torch.stack(sample_scores, dim=0)
 
     return scores.mean()
-

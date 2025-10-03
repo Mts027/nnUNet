@@ -2,6 +2,12 @@ import numpy as np
 import pytest
 import torch
 
+pytest.importorskip("cupy")
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="CUDA device required for CCMetrics tests",
+)
+
 from CCMetrics import CCDiceMetric, space_separation
 from nnunetv2.training.loss.instance_losses import CCMetrics as TorchCCMetrics
 
@@ -36,11 +42,12 @@ def test_ccmetrics_matches_ccdice_empty(spatial):
 
     baseline = _baseline_score(y_pred_np, y_np)
 
-    module = TorchCCMetrics(metric=dice_fn, activation=None)
-    y_pred_t = torch.from_numpy(y_pred_np)
-    y_idx = torch.zeros((batch, 1, *spatial), dtype=torch.int64)
+    device = torch.device("cuda")
+    module = TorchCCMetrics(metric=dice_fn, activation=None).to(device)
+    y_pred_t = torch.from_numpy(y_pred_np).to(device)
+    y_idx = torch.zeros((batch, 1, *spatial), dtype=torch.int64, device=device)
 
-    torch_score = module(y_pred_t, y_idx).item()
+    torch_score = module(y_pred_t, y_idx).detach().cpu().item()
 
     assert torch_score == pytest.approx(baseline, rel=1e-4, abs=1e-5)
 
@@ -65,11 +72,12 @@ def test_ccmetrics_matches_ccdice_gt_nonempty_pred_empty(spatial):
 
     baseline = _baseline_score(y_pred_np, y_np)
 
-    module = TorchCCMetrics(metric=dice_fn, activation=None)
-    y_pred_t = torch.from_numpy(y_pred_np)
-    y_idx = torch.from_numpy(np.argmax(y_np, axis=1, keepdims=True).astype(np.int64))
+    device = torch.device("cuda")
+    module = TorchCCMetrics(metric=dice_fn, activation=None).to(device)
+    y_pred_t = torch.from_numpy(y_pred_np).to(device)
+    y_idx = torch.from_numpy(np.argmax(y_np, axis=1, keepdims=True).astype(np.int64)).to(device)
 
-    torch_score = module(y_pred_t, y_idx).item()
+    torch_score = module(y_pred_t, y_idx).detach().cpu().item()
 
     assert torch_score == pytest.approx(baseline, rel=1e-4, abs=1e-5)
 
@@ -91,19 +99,23 @@ def test_ccmetrics_matches_ccdice_random_batch():
         pred_fg = torch.randint(0, 2, (1, *spatial), generator=generator, dtype=torch.float32)
         pred = torch.stack([1.0 - pred_fg, pred_fg], dim=1)
 
-        preds.append(pred.numpy())
-        gts.append(gt.numpy())
+        pred_np = pred.numpy()
+        gt_np = gt.numpy()
 
-        cc_dice(y_pred=pred.numpy(), y=gt.numpy())
+        preds.append(pred_np)
+        gts.append(gt_np)
 
-        idxs.append(torch.argmax(gt, dim=1, keepdim=True).to(torch.int64))
+        cc_dice(y_pred=pred_np, y=gt_np)
+
+        idxs.append(np.argmax(gt_np, axis=1, keepdims=True).astype(np.int64))
 
     baseline = float((1.0 - cc_dice.cc_aggregate()).mean())
 
-    batch_pred = torch.from_numpy(np.concatenate(preds, axis=0))
-    batch_idx = torch.from_numpy(torch.cat(idxs, dim=0).numpy())
+    device = torch.device("cuda")
+    batch_pred = torch.from_numpy(np.concatenate(preds, axis=0)).to(device)
+    batch_idx = torch.from_numpy(np.concatenate(idxs, axis=0)).to(device)
 
-    module = TorchCCMetrics(metric=dice_fn, activation=None)
-    torch_score = module(batch_pred, batch_idx).item()
+    module = TorchCCMetrics(metric=dice_fn, activation=None).to(device)
+    torch_score = module(batch_pred, batch_idx).detach().cpu().item()
 
     assert torch_score == pytest.approx(baseline, rel=0.01, abs=1e-2)
