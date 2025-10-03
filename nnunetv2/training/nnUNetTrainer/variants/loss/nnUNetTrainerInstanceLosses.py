@@ -11,6 +11,7 @@ from nnunetv2.training.loss.deep_supervision import DeepSupervisionWrapper
 from nnunetv2.training.loss.dice import MemoryEfficientSoftDiceLoss
 from nnunetv2.training.loss.instance_losses import BlobLoss, CCMetrics
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
+from nnunetv2.utilities.git_logging import log_git_context
 from nnunetv2.utilities.helpers import softmax_helper_dim1
 
 
@@ -142,6 +143,17 @@ def _assert_instance_loss_prerequisites(trainer: nnUNetTrainer):
 
 
 class _InstanceOnlyTrainerMixin(nnUNetTrainer):
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        log_git_context(self)
+
     def _build_instance_loss(self) -> nn.Module:
         raise NotImplementedError
 
@@ -152,6 +164,17 @@ class _InstanceOnlyTrainerMixin(nnUNetTrainer):
 
 
 class _InstanceGlobalTrainerMixin(nnUNetTrainer):
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        log_git_context(self)
+
     global_component_weight: float = 1.0
     instance_component_weight: float = 1.0
 
