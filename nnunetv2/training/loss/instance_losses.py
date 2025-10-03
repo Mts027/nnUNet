@@ -13,7 +13,7 @@ class CCMetrics(torch.nn.Module):
     def forward(self, y_pred, y):
         assert y_pred.ndim == 5 and y_pred.shape[1] == 2, f"Expected y_pred with shape [B,2,H,W,D], but got {tuple(y_pred.shape)}"
         assert list(y.shape) == [y_pred.shape[0], 1, *y_pred.shape[2:]], f"Expected y with shape ({tuple(y_pred.shape)}) [B,1,H,W,D], but got {tuple(y.shape)}"
-        assert y.dtype == torch.int64, f"Expected y.dtype=torch.int64, but got {y.dtype}"
+        assert y.dtype == torch.int16, f"Expected y.dtype=torch.int16, but got {y.dtype}"
 
         assert y_pred.is_cuda, f"CCMetrics expects CUDA tensors for y_pred, but got device {y_pred.device}."
         assert y.is_cuda, f"CCMetrics expects CUDA tensors for y, but got device {y.device}."
@@ -53,7 +53,7 @@ class BlobLoss(torch.nn.Module):
     def forward(self, y_pred, y):
         assert y_pred.ndim == 5 and y_pred.shape[1] == 2, f"Expected y_pred with shape [B,2,H,W,D], but got {tuple(y_pred.shape)}"
         assert list(y.shape) == [y_pred.shape[0], 1, *y_pred.shape[2:]], f"Expected y with shape ({tuple(y_pred.shape)}) [B,1,H,W,D], but got {tuple(y.shape)}"
-        assert y.dtype == torch.int64, f"Expected y.dtype=torch.int64, but got {y.dtype}"
+        assert y.dtype == torch.int16, f"Expected y.dtype=torch.int16, but got {y.dtype}"
 
         assert y_pred.is_cuda, f"BlobLoss expects CUDA tensors for y_pred, but got device {y_pred.device}."
         assert y.is_cuda, f"BlobLoss expects CUDA tensors for y, but got device {y.device}."
