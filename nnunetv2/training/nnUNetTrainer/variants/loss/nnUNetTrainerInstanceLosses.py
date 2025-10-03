@@ -142,51 +142,34 @@ def _assert_instance_loss_prerequisites(trainer: nnUNetTrainer):
         raise AssertionError("Blob/CC instance losses require a binary segmentation (background + foreground)")
 
 
-class _InstanceOnlyTrainerMixin(nnUNetTrainer):
-    def __init__(
-        self,
-        plans: dict,
-        configuration: str,
-        fold: int,
-        dataset_json: dict,
-        device: torch.device = torch.device("cuda"),
-    ):
-        super().__init__(plans, configuration, fold, dataset_json, device)
-        log_git_context(self)
-
-    def _build_instance_loss(self) -> nn.Module:
-        raise NotImplementedError
-
-    def _build_loss(self) -> nn.Module:  # type: ignore[override]
-        _assert_instance_loss_prerequisites(self)
-        instance_loss = self._build_instance_loss()
-        return integrate_deep_supervision(self, instance_loss)
-
-
-class _InstanceGlobalTrainerMixin(nnUNetTrainer):
-    def __init__(
-        self,
-        plans: dict,
-        configuration: str,
-        fold: int,
-        dataset_json: dict,
-        device: torch.device = torch.device("cuda"),
-    ):
-        super().__init__(plans, configuration, fold, dataset_json, device)
-        log_git_context(self)
-
+class _InstanceTrainerBase(nnUNetTrainer):
+    include_global_component: bool = False
     global_component_weight: float = 1.0
     instance_component_weight: float = 1.0
 
+    def __init__(
+        self,
+        plans: dict,
+        configuration: str,
+        fold: int,
+        dataset_json: dict,
+        device: torch.device = torch.device("cuda"),
+    ):
+        super().__init__(plans, configuration, fold, dataset_json, device)
+        log_git_context(self)
+
     def _build_instance_loss(self) -> nn.Module:
         raise NotImplementedError
 
     def _build_loss(self) -> nn.Module:  # type: ignore[override]
         _assert_instance_loss_prerequisites(self)
 
-        global_loss = _build_global_dc_ce_loss(self)
-        instance_loss = self._build_instance_loss()
+        instance_loss = self._build_instance_loss().to(self.device)
 
+        if not self.include_global_component:
+            return integrate_deep_supervision(self, instance_loss)
+
+        global_loss = _build_global_dc_ce_loss(self).to(self.device)
         components = [
             ("global", global_loss, self.global_component_weight),
             ("instance", instance_loss, self.instance_component_weight),
@@ -195,25 +178,29 @@ class _InstanceGlobalTrainerMixin(nnUNetTrainer):
         return integrate_deep_supervision(self, mixed_loss)
 
 
-class nnUNetTrainerCCDiceCE(_InstanceOnlyTrainerMixin):
+class nnUNetTrainerCCDiceCE(_InstanceTrainerBase):
     def _build_instance_loss(self) -> nn.Module:
         cc_loss = CCMetrics(metric=_component_dice_ce_loss, activation=softmax_helper_dim1)
-        return cc_loss.to(self.device)
+        return cc_loss
 
 
-class nnUNetTrainerBlobDiceCE(_InstanceOnlyTrainerMixin):
+class nnUNetTrainerBlobDiceCE(_InstanceTrainerBase):
     def _build_instance_loss(self) -> nn.Module:
         blob_loss = BlobLoss(metric=_component_dice_ce_loss, activation=softmax_helper_dim1)
-        return blob_loss.to(self.device)
+        return blob_loss
 
 
-class nnUNetTrainerGlobalCCDiceCE(_InstanceGlobalTrainerMixin):
+class nnUNetTrainerGlobalCCDiceCE(_InstanceTrainerBase):
+    include_global_component = True
+
     def _build_instance_loss(self) -> nn.Module:
         cc_loss = CCMetrics(metric=_component_dice_ce_loss, activation=softmax_helper_dim1)
-        return cc_loss.to(self.device)
+        return cc_loss
 
 
-class nnUNetTrainerGlobalBlobDiceCE(_InstanceGlobalTrainerMixin):
+class nnUNetTrainerGlobalBlobDiceCE(_InstanceTrainerBase):
+    include_global_component = True
+
     def _build_instance_loss(self) -> nn.Module:
         blob_loss = BlobLoss(metric=_component_dice_ce_loss, activation=softmax_helper_dim1)
-        return blob_loss.to(self.device)
+        return blob_loss
