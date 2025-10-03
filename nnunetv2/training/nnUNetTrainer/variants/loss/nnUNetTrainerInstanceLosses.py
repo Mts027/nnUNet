@@ -150,6 +150,9 @@ class _InstanceTrainerBase(nnUNetTrainer):
         device: torch.device = torch.device("cuda"),
     ):
         super().__init__(plans, configuration, fold, dataset_json, device)
+        # TODO: Epochs for testing reduced
+        self.num_epochs = 150
+        
         log_git_context(self)
 
     def _build_instance_loss(self) -> nn.Module:
