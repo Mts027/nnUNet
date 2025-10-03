@@ -23,18 +23,19 @@ def dice_fn(y_pred: torch.Tensor, y: torch.Tensor, mask: torch.Tensor | None = N
 
 
 def _baseline_score(y_pred_np: np.ndarray, y_np: np.ndarray) -> float:
-    cc_dice = CCDiceMetric(cc_reduction="patient")
+    samples = []
     for batch_index in range(y_np.shape[0]):
+        cc_dice = CCDiceMetric(cc_reduction="patient")
         space_separation.compute_voronoi_regions(
             y_np[batch_index, 1].astype(np.uint16, copy=False)
         )
-        # CCDiceMetric from CC-Metrics only supports batch size 1, so feed samples separately.
         cc_dice(
             y_pred=y_pred_np[batch_index : batch_index + 1],
             y=y_np[batch_index : batch_index + 1],
         )
-    score = (1.0 - cc_dice.cc_aggregate()).mean()
-    return float(score)
+        sample = (1.0 - cc_dice.cc_aggregate()).mean()
+        samples.append(float(sample))
+    return float(np.mean(samples))
 
 
 @pytest.mark.parametrize("spatial", [(24, 24, 24)])
@@ -104,16 +105,7 @@ def test_ccmetrics_matches_ccdice_random_batch(spatial, p_fg_gt, p_fg_pred, seed
     gt_np = np.stack([1.0 - gt_fg, gt_fg], axis=1)
     pred_np = np.stack([1.0 - pred_fg, pred_fg], axis=1)
 
-    cc_dice = CCDiceMetric(cc_reduction="patient")
-    for batch_index in range(batch):
-        space_separation.compute_voronoi_regions(
-            gt_np[batch_index, 1].astype(np.uint16, copy=False)
-        )
-        cc_dice(
-            y_pred=pred_np[batch_index : batch_index + 1],
-            y=gt_np[batch_index : batch_index + 1],
-        )
-    baseline = float((1.0 - cc_dice.cc_aggregate()).mean())
+    baseline = _baseline_score(pred_np, gt_np)
 
     device = torch.device("cuda")
     batch_pred = torch.from_numpy(pred_np).to(device)
