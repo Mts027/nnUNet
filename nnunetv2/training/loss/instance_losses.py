@@ -1,44 +1,35 @@
 import torch
 import torch.nn.functional as F
 from typing import Callable, Optional
+from nnunetv2.utilities.connected_components import get_voronoi
 
-class CCBase(torch.nn.Module):
-    """Wrap a metric so it can operate on connected-component partitions."""
-
-    def __init__(self, metric, has_regions, activation) -> None:
+class CCMetrics(torch.nn.Module):
+    def __init__(self, metric, activation) -> None:
         super().__init__()
 
         self.metric = metric
-        # Not used anymore - we will keep it for api compatibility
-        self.has_regions = has_regions
         self.activation = activation
 
-    # @torch.compile
     def forward(self, y_pred, y):
-        skip_first = True
-        assert y_pred.ndim == 5 and y_pred.shape[1] > 1, "Expect [B,>1,H,W,D] logits"
-        assert y.shape[1] == 1
+        assert y_pred.ndim == 5 and y_pred.shape[1] == 2, f"Expected y_pred with shape [B,2,H,W,D], but got {tuple(y_pred.shape)}"
+        assert list(y.shape) == [y_pred.shape[0], 1, *y_pred.shape[2:]], f"Expected y with shape ({tuple(y_pred.shape)}) [B,1,H,W,D], but got {tuple(y.shape)}"
+        assert y.dtype == torch.int64, f"Expected y.dtype=torch.int64, but got {y.dtype}"
 
         y_idx = y[:, 0].long()  # [B,*]
         y = F.one_hot(y_idx, num_classes=y_pred.shape[1]).movedim(-1, 1).float()  # [B,2,*]
 
-        if skip_first:
-            y_pred = y_pred[:, 1:, ...]
-            y = y[:, 1:, ...]
-
-        cc_assignments = get_voronoi(y, do_bg=skip_first, use_cpu=False)
+        voronoi = get_voronoi(y, do_bg=False, use_cpu=True)
+        voronoi = voronoi[:, 0,...]
 
         assert y_pred.shape == y.shape, "y_pred and one-hot y must match"
-        assert cc_assignments.shape == y_pred.shape
-        assert cc_assignments.dtype == torch.int64
+        assert voronoi.dtype == torch.int64
+        assert list(voronoi.shape) == [y_pred.shape[0], *y_pred.shape[2:]], f"Expected voronoi with shape [B,H,W,D], but got {tuple(voronoi.shape)}"
  
-        return cc(
+        return binary_cc(
             y_pred=y_pred,
             y=y,
-            voronoi=cc_assignments,
+            voronoi=voronoi,
             metric=self.metric,
-            channel_reduction_fn=torch.mean,
-            include_first_channel=skip_first,
             activation=self.activation,
         )
 
@@ -56,7 +47,7 @@ def per_channel_cc(
     max_id = cc.max()
     if max_id == 0:
         # fallback: treat whole channel as one component
-        return metric(y_pred, y, torch.ones_likes(y))
+        return metric(y_pred, y, torch.ones_like(y))
 
     ids = torch.unique(cc)
     ids = ids[ids > 0]
@@ -78,9 +69,10 @@ def per_channel_cc(
     for comp_id in ids:
         mask = (cc == comp_id).to(y_pred.dtype)
         # checkpoint the component-level forward
-        score: torch.Tensor = torch.utils.checkpoint(_component_score, y_pred, y, mask, use_reentrant = False)
-        assert score.ndim == 0
+        score: torch.Tensor = torch.utils.checkpoint.checkpoint(_component_score, y_pred, y, mask, use_reentrant = False)
+        assert score.ndim == 0, "metric_fn should return scalar functions"
         scores.append(score)
+
     return torch.stack(scores, dim=0).mean()
 
 
@@ -98,8 +90,6 @@ def binary_cc(
         y: One-hot ground truth tensor with the same shape as ``y_pred``.
         voronoi: Integer labels describing connected components per channel.
         metric: Callable applied to each component; should accept ``(pred, true)`` tensors.
-        channel_reduction_fn: Aggregation applied after component scores per channel.
-        include_first_channel: Whether channel 0 is part of the reduction.
         activation: Optional callable applied to ``y_pred`` before metric evaluation.
     """
     # -- sanity checks --
@@ -114,11 +104,16 @@ def binary_cc(
     if activation is not None:
         y_pred = activation(y_pred)
 
-    B, C = y_pred.shape[:2]
+    B = y_pred.shape[0]
     sample_scores: list[torch.Tensor] = []
 
-    scores = torch.func.vmap(per_channel_cc, in_dims=(0, 0, 0, None,))(y_pred, y, voronoi, metric)
+    # Instead of vmap, loop over the batch
+    for i in range(B):
+        score = per_channel_cc(y_pred[i], y[i], voronoi[i], metric)
+        sample_scores.append(score)
+
+    # Stack the results into a tensor (if that's what vmap was producing)
+    scores = torch.stack(sample_scores, dim=0)
 
     return scores.mean()
-
 
