@@ -99,7 +99,8 @@ def per_channel_cc(
     max_id = cc.max()
     if max_id == 0:
         # fallback: treat whole channel as one component
-        return metric(y_pred, y, torch.ones_like(y), torch.ones_like(y))
+        mask = torch.ones_like(y[0], dtype=torch.bool)
+        return metric(y_pred, y, mask, mask)
 
     ids = torch.unique(cc)
     ids = ids[ids > 0]
@@ -127,7 +128,9 @@ def per_channel_cc(
     for comp_id in ids:
         pred_mask, true_mask = masking_fn(comp_id, cc)
         # checkpoint the component-level forward
-        score: torch.Tensor = torch.utils.checkpoint.checkpoint(_component_score, y_pred, y, pred_mask, true_mask, use_reentrant = False)
+        score: torch.Tensor = torch.utils.checkpoint.checkpoint(
+            _component_score, y_pred, y, pred_mask, true_mask, use_reentrant=False
+        )
         assert score.ndim == 0, "metric_fn should return scalar functions"
         scores.append(score)
 

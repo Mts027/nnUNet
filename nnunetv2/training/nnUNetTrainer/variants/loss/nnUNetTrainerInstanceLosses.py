@@ -167,7 +167,11 @@ class _InstanceTrainerBase(nnUNetTrainer):
         instance_loss = self._build_instance_loss().to(self.device)
 
         if not self.include_global_component:
-            return integrate_deep_supervision(self, instance_loss)
+            final_loss = integrate_deep_supervision(self, instance_loss)
+            final_loss = final_loss.to(self.device)
+            if self._do_i_compile():
+                final_loss = torch.compile(final_loss)
+            return final_loss
 
         global_loss = _build_global_dc_ce_loss(self).to(self.device)
         components = [
@@ -175,7 +179,11 @@ class _InstanceTrainerBase(nnUNetTrainer):
             ("instance", instance_loss, self.instance_component_weight),
         ]
         mixed_loss = LossMixer(components)
-        return integrate_deep_supervision(self, mixed_loss)
+        final_loss = integrate_deep_supervision(self, mixed_loss)
+        final_loss = final_loss.to(self.device)
+        if self._do_i_compile():
+            final_loss = torch.compile(final_loss)
+        return final_loss
 
 
 class nnUNetTrainerCCDiceCE(_InstanceTrainerBase):
