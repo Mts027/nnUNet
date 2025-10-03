@@ -82,38 +82,31 @@ def test_ccmetrics_matches_ccdice_gt_nonempty_pred_empty(spatial):
     assert torch_score == pytest.approx(baseline, rel=1e-4, abs=1e-5)
 
 
-def test_ccmetrics_matches_ccdice_random_batch():
-    spatial = (16, 16, 16)
-    seeds = list(range(8))
+@pytest.mark.parametrize(
+    "spatial,p_fg_gt,p_fg_pred,seed",
+    [
+        ((16, 16, 16), 0.5, 0.5, 0),
+        ((12, 18, 20), 0.2, 0.7, 1),
+        ((20, 20, 12), 0.8, 0.3, 2),
+    ],
+)
+def test_ccmetrics_matches_ccdice_random_batch(spatial, p_fg_gt, p_fg_pred, seed):
+    batch = 4
+    rng = np.random.default_rng(seed)
 
-    preds = []
-    gts = []
-    idxs = []
+    gt_fg = (rng.random((batch, *spatial), dtype=np.float32) < p_fg_gt).astype(np.float32)
+    pred_fg = (rng.random((batch, *spatial), dtype=np.float32) < p_fg_pred).astype(np.float32)
+
+    gt_np = np.stack([1.0 - gt_fg, gt_fg], axis=1)
+    pred_np = np.stack([1.0 - pred_fg, pred_fg], axis=1)
+
     cc_dice = CCDiceMetric(cc_reduction="patient")
-
-    for seed in seeds:
-        generator = torch.Generator().manual_seed(seed)
-        gt_fg = torch.randint(0, 2, (1, *spatial), generator=generator, dtype=torch.float32)
-        gt = torch.stack([1.0 - gt_fg, gt_fg], dim=1)
-
-        pred_fg = torch.randint(0, 2, (1, *spatial), generator=generator, dtype=torch.float32)
-        pred = torch.stack([1.0 - pred_fg, pred_fg], dim=1)
-
-        pred_np = pred.numpy()
-        gt_np = gt.numpy()
-
-        preds.append(pred_np)
-        gts.append(gt_np)
-
-        cc_dice(y_pred=pred_np, y=gt_np)
-
-        idxs.append(np.argmax(gt_np, axis=1, keepdims=True).astype(np.int64))
-
+    cc_dice(y_pred=pred_np, y=gt_np)
     baseline = float((1.0 - cc_dice.cc_aggregate()).mean())
 
     device = torch.device("cuda")
-    batch_pred = torch.from_numpy(np.concatenate(preds, axis=0)).to(device)
-    batch_idx = torch.from_numpy(np.concatenate(idxs, axis=0)).to(device)
+    batch_pred = torch.from_numpy(pred_np).to(device)
+    batch_idx = torch.from_numpy(np.argmax(gt_np, axis=1, keepdims=True).astype(np.int64)).to(device)
 
     module = TorchCCMetrics(metric=dice_fn, activation=None).to(device)
     torch_score = module(batch_pred, batch_idx).detach().cpu().item()
