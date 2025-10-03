@@ -121,4 +121,4 @@ def test_blobloss_matches_reference_random_batch(spatial, p_fg_gt, p_fg_pred, se
     module = TorchBlobLoss(metric=blob_loss_metric, activation=None).to(device)
     torch_score = module(batch_pred, batch_idx).detach().cpu().item()
 
-    assert torch_score == pytest.approx(baseline, rel=0.01, abs=1e-2)
+    assert torch_score == pytest.approx(baseline, rel=1e-5, abs=1e-5)
