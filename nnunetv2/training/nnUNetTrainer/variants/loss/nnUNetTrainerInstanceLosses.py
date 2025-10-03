@@ -140,6 +140,7 @@ class _InstanceTrainerBase(nnUNetTrainer):
     include_global_component: bool = False
     global_component_weight: float = 1.0
     instance_component_weight: float = 1.0
+    use_instance_loss: bool = True
 
     def __init__(
         self,
@@ -161,22 +162,24 @@ class _InstanceTrainerBase(nnUNetTrainer):
     def _build_loss(self) -> nn.Module:  # type: ignore[override]
         _assert_instance_loss_prerequisites(self)
 
-        instance_loss = self._build_instance_loss().to(self.device)
+        components: list[tuple[str, nn.Module, float]] = []
 
-        if not self.include_global_component:
-            final_loss = integrate_deep_supervision(self, instance_loss)
-            final_loss = final_loss.to(self.device)
-            if self._do_i_compile():
-                final_loss = torch.compile(final_loss)
-            return final_loss
+        if self.use_instance_loss:
+            instance_loss = self._build_instance_loss().to(self.device)
+            components.append(("instance", instance_loss, self.instance_component_weight))
 
-        global_loss = _build_global_dc_ce_loss(self).to(self.device)
-        components = [
-            ("global", global_loss, self.global_component_weight),
-            ("instance", instance_loss, self.instance_component_weight),
-        ]
-        mixed_loss = LossMixer(components)
-        final_loss = integrate_deep_supervision(self, mixed_loss)
+        if self.include_global_component or not self.use_instance_loss:
+            global_loss = _build_global_dc_ce_loss(self).to(self.device)
+            components.append(("global", global_loss, self.global_component_weight))
+
+        assert components, "At least one loss component must be active"
+
+        if len(components) == 1:
+            final_loss = components[0][1]
+        else:
+            final_loss = LossMixer(components)
+
+        final_loss = integrate_deep_supervision(self, final_loss)
         final_loss = final_loss.to(self.device)
         if self._do_i_compile():
             final_loss = torch.compile(final_loss)
@@ -209,3 +212,8 @@ class nnUNetTrainerGlobalBlobDiceCE(_InstanceTrainerBase):
     def _build_instance_loss(self) -> nn.Module:
         blob_loss = BlobLoss(metric=_component_dice_ce_loss, activation=softmax_helper_dim1)
         return blob_loss
+
+
+class nnUNetTrainerDiceCEBaseline(_InstanceTrainerBase):
+    include_global_component = True
+    use_instance_loss = False
