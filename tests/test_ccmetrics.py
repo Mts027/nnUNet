@@ -12,7 +12,7 @@ from CCMetrics import CCDiceMetric, space_separation
 from nnunetv2.training.loss.instance_losses import CCMetrics as TorchCCMetrics
 
 
-def dice_fn(y_pred: torch.Tensor, y: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
+def dice_fn(y_pred: torch.Tensor, y: torch.Tensor, mask1, mask2) -> torch.Tensor:
     pred_fg = y_pred[1]
     true_fg = y[1]
     intersection = (pred_fg * true_fg).sum()
