@@ -28,7 +28,11 @@ def _baseline_score(y_pred_np: np.ndarray, y_np: np.ndarray) -> float:
         space_separation.compute_voronoi_regions(
             y_np[batch_index, 1].astype(np.uint16, copy=False)
         )
-    cc_dice(y_pred=y_pred_np, y=y_np)
+        # CCDiceMetric from CC-Metrics only supports batch size 1, so feed samples separately.
+        cc_dice(
+            y_pred=y_pred_np[batch_index : batch_index + 1],
+            y=y_np[batch_index : batch_index + 1],
+        )
     score = (1.0 - cc_dice.cc_aggregate()).mean()
     return float(score)
 
@@ -101,7 +105,14 @@ def test_ccmetrics_matches_ccdice_random_batch(spatial, p_fg_gt, p_fg_pred, seed
     pred_np = np.stack([1.0 - pred_fg, pred_fg], axis=1)
 
     cc_dice = CCDiceMetric(cc_reduction="patient")
-    cc_dice(y_pred=pred_np, y=gt_np)
+    for batch_index in range(batch):
+        space_separation.compute_voronoi_regions(
+            gt_np[batch_index, 1].astype(np.uint16, copy=False)
+        )
+        cc_dice(
+            y_pred=pred_np[batch_index : batch_index + 1],
+            y=gt_np[batch_index : batch_index + 1],
+        )
     baseline = float((1.0 - cc_dice.cc_aggregate()).mean())
 
     device = torch.device("cuda")
