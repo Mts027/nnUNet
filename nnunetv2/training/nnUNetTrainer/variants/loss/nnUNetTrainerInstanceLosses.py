@@ -89,7 +89,7 @@ def _component_dice_ce_loss(
     pred_mask: torch.Tensor,
     true_mask: torch.Tensor,
 ) -> torch.Tensor:
-    eps = 1e-5
+    eps = 1e-7
 
     yp = y_pred.to(torch.float32)
     yt = y_true.to(torch.float32)
